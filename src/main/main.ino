@@ -3,18 +3,23 @@
 #include <SR04.h>
 #include <DFRobotDFPlayerMini.h>
 #include <Adafruit_NeoPixel.h>
+#include <CapacitiveSensor.h>
 
 // === Pin Definitions ===
+#define CAPACITIVE_SENSOR_RECEIVE_PIN 2
 #define ECHO_PIN 3
 #define TRIG_PIN 4
 #define BUTTON_PIN 5
-#define HEAD_BUTTON_PIN 6
+#define CAPACITIVE_SENSOR_SEND_PIN 6
 #define HEAD_SERVO_PIN 8
 #define DX_SERVO_PIN 9
 #define SX_SERVO_PIN 10
 #define RX_PIN 11
 #define TX_PIN 12
 #define LED_STRIP_PIN 13
+
+// === Touch Sensor ===
+CapacitiveSensor cs = CapacitiveSensor(4, 2);
 
 // === Led Strip ===
 const int NUM_LEDS = 12;
@@ -59,22 +64,21 @@ bool headTouched = false;
 // === Setup ===
 void setup() {
   Serial.begin(9600);
-  //mp3Serial.begin(9600);
+  mp3Serial.begin(9600);
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(HEAD_BUTTON_PIN, INPUT_PULLUP);
   pinMode(RX_PIN, INPUT);
   pinMode(TX_PIN, OUTPUT);
 
-  // if (!mp3.begin(mp3Serial)) {
-  //   Serial.println("Unable to begin MP3 player. Check connections.");
-  //   while (true)
-  //     ;  // Stop everything
-  // }
+  if (!mp3.begin(mp3Serial)) {
+    Serial.println("Unable to begin MP3 player. Check connections.");
+    while (true)
+      ;  // Stop everything
+  }
 
-  // mp3.setTimeOut(500);  //TODO : should it be increased?
-  // mp3.volume(30);       // Set volume (0-30)
-  // mp3.EQ(DFPLAYER_EQ_NORMAL);
+  mp3.setTimeOut(500);  //TODO : should it be increased?
+  mp3.volume(30);       // Set volume (0-30)
+  mp3.EQ(DFPLAYER_EQ_NORMAL);
   strip.begin();
   strip.show();
   Serial.println("MP3 player ready.");
@@ -108,41 +112,28 @@ void loop() {
       headTouchStartTime = millis();
       break;
 
-    case SEEK_INTERACTION:
-      //check if head has been touched
-      Serial.println(">> Wait head touch");
-      if (digitalRead(HEAD_BUTTON_PIN) == LOW) {
-        Serial.println(">> Head touched!");
-        //If yes, send event to other modules and animation with led white , then state AWAIT_BALL
-        state = AWAIT_BALL;
-      } else if (millis() - headTouchStartTime > 40000) {
-        Serial.println(">> Timeout, head not touched.");
-        state = IDLE;
-      }
-      break;
-
     case AWAIT_BALL:
       //check message for the ball
+      Serial.println(state);
+      delay(1000);
       Serial.println(">> Waiting for ball message");
       state = CELEBRATE;
       break;
-
 
     case CELEBRATE:
       //reproduce sounds
       //color led
       Serial.println(">> Celebrating new ball!");
-      for (int i = 0; i < 5; i++) {
-        setStripColor(255, 0, 0);  // Red
-        delay(200);
-        setStripColor(0, 255, 0);  // Green
-        delay(200);
-        setStripColor(0, 0, 255);  // Blu
-        delay(200);
-        setStripColor(0, 0, 0);  // Off
-        delay(200);
-      }
-
+      // for (int i = 0; i < 5; i++) {
+      //   setStripColor(255, 0, 0);  // Red
+      //   delay(200);
+      //   setStripColor(0, 255, 0);  // Green
+      //   delay(200);
+      //   setStripColor(0, 0, 255);  // Blu
+      //   delay(200);
+      //   setStripColor(0, 0, 0);  // Off
+      //   delay(200);
+      // }
       state = IDLE;
       //reset position head and arm.
       break;
@@ -160,6 +151,24 @@ void loop() {
       currentQueuePos = currentTrack;
       state = IDLE;
       break;
+
+
+    case SEEK_INTERACTION:
+      //check if head has been touched
+      Serial.println(">> Wait head touch");
+      long touchValue = 0;
+      touchValue = cs.capacitiveSensor(30);
+      if (touchValue > 800) {
+        Serial.println(">> Head touched!");
+        //If yes, send event to other modules and animation with led white , then state AWAIT_BALL
+        state = AWAIT_BALL;
+        delay(50);
+      } else if (millis() - headTouchStartTime > 40000) {
+        Serial.println(">> Timeout, head not touched.");
+        state = IDLE;
+      };
+      Serial.println("exit seek interaction");
+      break;
   }
   delay(100);
 }
@@ -168,7 +177,7 @@ void loop() {
 void performGreetings() {
   Serial.println("Start greetings...");
   int randomTrack = random(1, 4);  //TODO: Change folder to play robot sounds
-  //mp3.play(1);
+  mp3.play(1);
   Serial.println("Play track");
   delay(1000);  //TODO: can it be removed??
 
@@ -177,13 +186,16 @@ void performGreetings() {
   headServo.attach(HEAD_SERVO_PIN);
 
   armServoDx.write(180);
+  headServo.write(0);
   delay(1000);
   armServoDx.write(90);
+  headServo.write(45);
   delay(1000);
   armServoDx.write(180);
+  headServo.write(0);
   delay(1000);
-  armServoDx.detach();
 
+  armServoDx.detach();
   armServoSx.detach();
   headServo.detach();
 }
