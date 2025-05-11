@@ -38,7 +38,7 @@ RobotState state = IDLE;
 CapacitiveSensor cs = CapacitiveSensor(4, 2);
 
 // === Led Strip ===
-const int NUM_LEDS = 12;
+const int NUM_LEDS = 9;
 Adafruit_NeoPixel strip(NUM_LEDS, LED_STRIP_PIN, NEO_GRB + NEO_KHZ800);
 
 // === Ultrasonic Sensor ===
@@ -67,16 +67,16 @@ unsigned long headTouchStartTime = 0;
 unsigned long lastQueueCallTime = 0;
 
 // === HEAD Movement State ===
-int headAngles[] = { 0, 15, 30, 45 };
+int headAngles[] = { 0, 10, 15 };
 int headStep = 0;
 bool headMoving = false;
 unsigned long lastHeadMoveTime = 0;
-const unsigned long headStepDelay = 500;
+const unsigned long headStepDelay = 200;
 
 // === ARM Movement State ===
 int armStep = 0;
 unsigned long lastArmMoveTime = 0;
-const unsigned long armStepDelay = 200;
+const unsigned long armStepDelay = 50;
 bool armMoving = false;
 bool armDirectionDown = true;
 
@@ -133,6 +133,7 @@ void loop() {
         lastQueueCallTime = millis();
         Serial.println(">> Current queue pos != current track or expired");
       } else if (distance > 0 && distance < DISTANCE_THRESHOLD) {  //&& millis() - lastDetectionTime > detectionCooldown) {  //if last time detectione expired
+        headServo.write(0);
         state = GREET_PERSON;
         lastDetectionTime = millis();
         Serial.println(">> Person detected close to the robot");
@@ -210,14 +211,14 @@ void loop() {
 
   // === ARM MOVEMENT HANDLER ===
   if (armMoving && millis() - lastArmMoveTime >= armStepDelay) {
-    int angle = armDirectionDown ? 180 : 135;
+    int angle = armDirectionDown ? 180 : 145;
     if (armStep % 2 == 0) armServoSx.write(angle);
     else armServoDx.write(angle);
 
     lastArmMoveTime = millis();
     armStep++;
 
-    if (armStep >= 8) {
+    if (armStep >= 12) {
       armMoving = false;
     } else if (armStep % 2 == 0) {
       armDirectionDown = !armDirectionDown;
@@ -226,20 +227,21 @@ void loop() {
 
   // === LED HANDLER ===
   if (ledAnimating && millis() - lastLedUpdate >= ledUpdateInterval) {
+    Serial.println("Led");
     lastLedUpdate = millis();
-
-    if (ledMode == 0) {
-      setStripColor((ledAnimationStep % 2) * 255, (ledAnimationStep % 2) * 255, (ledAnimationStep % 2) * 255);
-    } else if (ledMode == 1) {
-      if (ledAnimationStep % 2 == 0) {
-        setStripColor(0, 255, 0);
-      } else {
-        setStripColor(0, 0, 255);
-      }
-    }
+    setStripColor(0,0,0);
+    // if (ledMode == 0) {
+    //   setStripColor((ledAnimationStep % 2) * 255, (ledAnimationStep % 2) * 255, (ledAnimationStep % 2) * 255);
+    // } else if (ledMode == 1) {
+    //   if (ledAnimationStep % 2 == 0) {
+    //     setStripColor(0, 255, 0);
+    //   } else {
+    //     setStripColor(0, 0, 255);
+    //   }
+    // }
 
     ledAnimationStep++;
-    if (ledAnimationStep >= 10) {
+    if (ledAnimationStep >= 4) {
       ledAnimating = false;
     }
   }
@@ -300,8 +302,12 @@ void onRequest() {
 
 // === UTILS ===
 void setStripColor(uint8_t r, uint8_t g, uint8_t b) {
+  // for (int i = 0; i < NUM_LEDS; i++) {
+  //   strip.setPixelColor(i, strip.Color(r, g, b));
+  // }
+  // strip.show();
   for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(r, g, b));
+    strip.setPixelColor(i, strip.Color(255, 255, 255)); // bianco
   }
   strip.show();
 }
