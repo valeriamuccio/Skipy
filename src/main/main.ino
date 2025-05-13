@@ -32,7 +32,19 @@ enum RobotState {
   CALL_NEXT
 };
 
+enum ArmMotorsActions {
+  NONE_ARM,
+  HELLO
+};
+
+enum HeadMotorsActions {
+  NONE_HEAD,
+  PET
+};
+
 RobotState state = IDLE;
+ArmMotorsActions armAction = NONE_ARM;
+HeadMotorsActions headAction = NONE_HEAD;
 
 // === Touch Sensor ===
 CapacitiveSensor cs = CapacitiveSensor(4, 2);
@@ -60,6 +72,7 @@ bool headTouched = false;
 int currentTrack = 0;
 int totalTracks = 10;  // Total number of tracks in the folder (adjust as needed)
 int currentQueuePos = 0;
+int headTouchAttempt = 0;
 long distance;
 const unsigned long detectionCooldown = 60000;  // 1 minute
 unsigned long lastDetectionTime = 0;
@@ -67,17 +80,15 @@ unsigned long headTouchStartTime = 0;
 unsigned long lastQueueCallTime = 0;
 
 // === HEAD Movement State ===
-int headAngles[] = { 0, 10, 15 };
+int headAngles[] = { 0, 0, 0, 5, 10, 15, 20, 25, 30 };
 int headStep = 0;
-bool headMoving = false;
 unsigned long lastHeadMoveTime = 0;
-const unsigned long headStepDelay = 200;
+const unsigned long headStepDelay = 80;
 
 // === ARM Movement State ===
 int armStep = 0;
 unsigned long lastArmMoveTime = 0;
 const unsigned long armStepDelay = 50;
-bool armMoving = false;
 bool armDirectionDown = true;
 
 // === LED Animation State ===
@@ -101,7 +112,7 @@ void setup() {
   armServoSx.attach(SX_SERVO_PIN);
   armServoSx.write(90);
   headServo.attach(HEAD_SERVO_PIN);
-  headServo.write(0);
+  headServo.write(10);
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(RX_PIN, INPUT);
@@ -133,7 +144,7 @@ void loop() {
         lastQueueCallTime = millis();
         Serial.println(">> Current queue pos != current track or expired");
       } else if (distance > 0 && distance < DISTANCE_THRESHOLD) {  //&& millis() - lastDetectionTime > detectionCooldown) {  //if last time detectione expired
-        headServo.write(0);
+        headServo.write(10);
         state = GREET_PERSON;
         lastDetectionTime = millis();
         Serial.println(">> Person detected close to the robot");
@@ -141,7 +152,7 @@ void loop() {
       break;
 
     case GREET_PERSON:
-      headServo.write(0);
+      headServo.write(10);
       Serial.println(">> Greeting person");
       performGreetings();
       state = SEEK_INTERACTION;
@@ -181,69 +192,75 @@ void loop() {
 
 
     case SEEK_INTERACTION:
+      if (headAction != NONE_HEAD || armAction != NONE_HEAD) break;
       Serial.println(">> Wait head touch");
       long touchValue = 0;
       touchValue = cs.capacitiveSensor(30);
-      delay(50);
-      if (touchValue > 800) {
+      Serial.println(touchValue);
+      delay(80);
+      if (touchValue > 400) {
         Serial.println(">> Head touched!");
-        headServo.write(0);
+        headServo.write(25);
+        delay(50);
+        headServo.write(15);
+        delay(50);
+        headServo.write(10);
+
         //If yes, send event to other modules and animation with led white , then state AWAIT_BALL
         state = AWAIT_BALL;
-      } else if (millis() - headTouchStartTime > 40000) {
+      }else if (headTouchAttempt > 5) {
         Serial.println(">> Timeout, head not touched.");
         state = IDLE;
+      }
+      else if (millis() - headTouchStartTime > 3000) {
+        headServo.write(25);
+        armServoDx.write(180);
+        delay(100);
+        headServo.write(30);
+        armServoDx.write(170);
+        delay(100);
+        headServo.write(25);
+        armServoDx.write(180);
+        delay(100);
+         headServo.write(25);
+        armServoDx.write(180);
+        delay(100);
+        headServo.write(30);
+        armServoDx.write(170);
+        delay(100);
+        headServo.write(25);
+        armServoDx.write(180);
+        delay(100);
+        headTouchStartTime = millis();
+        headTouchAttempt++;
+        break;
       };
+      headTouchAttempt = 0;
       Serial.println("exit seek interaction");
       break;
   }
 
 
   // === HEAD MOVEMENT HANDLER ===
-  if (headMoving && millis() - lastHeadMoveTime >= headStepDelay) {
-    headServo.write(headAngles[headStep]);
-    lastHeadMoveTime = millis();
-    headStep++;
-    if (headStep >= sizeof(headAngles) / sizeof(headAngles[0])) {
-      headMoving = false;
-    }
+  if (headAction != NONE_HEAD && millis() - lastHeadMoveTime >= headStepDelay) {
+    if (headAction == PET) { headPettingAction(); }
   }
 
   // === ARM MOVEMENT HANDLER ===
-  if (armMoving && millis() - lastArmMoveTime >= armStepDelay) {
-    int angle = armDirectionDown ? 180 : 145;
-    if (armStep % 2 == 0) armServoSx.write(angle);
-    else armServoDx.write(angle);
-
-    lastArmMoveTime = millis();
-    armStep++;
-
-    if (armStep >= 12) {
-      armMoving = false;
-    } else if (armStep % 2 == 0) {
-      armDirectionDown = !armDirectionDown;
-    }
+  if (armAction != NONE_ARM && millis() - lastArmMoveTime >= armStepDelay) {
+    if (armAction == HELLO) { sayHelloAction(); }
   }
 
   // === LED HANDLER ===
   if (ledAnimating && millis() - lastLedUpdate >= ledUpdateInterval) {
     Serial.println("Led");
     lastLedUpdate = millis();
-    setStripColor(255,255,255);
-    // if (ledMode == 0) {
-    //   setStripColor((ledAnimationStep % 2) * 255, (ledAnimationStep % 2) * 255, (ledAnimationStep % 2) * 255);
-    // } else if (ledMode == 1) {
-    //   if (ledAnimationStep % 2 == 0) {
-    //     setStripColor(0, 255, 0);
-    //   } else {
-    //     setStripColor(0, 0, 255);
-    //   }
-    // }
+    setStripColor(255, 255, 255);
 
     ledAnimationStep++;
     if (ledAnimationStep >= 10) {
       setStripColor(0, 0, 0);
-      headServo.write(0);
+      headServo.write(10);
       ledAnimating = false;
     }
   }
@@ -261,19 +278,17 @@ void checkIfButtonPressed() {
 // === Actions ===
 void performGreetings() {
   Serial.println("Start greetings...");
-  int randomTrack = random(1, 4);  //TODO: Change folder to play robot sounds
-  mp3.play(1);
+  mp3.play(3);
   Serial.println("Play track");
   delay(1000);  //TODO: can it be removed??
   startArmMovement();
-  startHeadMovement();
 }
 
 // === Start HEAD Movement ===
 void startHeadMovement() {
   headStep = 0;
   lastHeadMoveTime = millis();
-  headMoving = true;
+  headAction = PET;
 }
 
 // === Start ARM Movement ===
@@ -281,7 +296,7 @@ void startArmMovement() {
   armStep = 0;
   lastArmMoveTime = millis();
   armDirectionDown = true;
-  armMoving = true;
+  armAction = HELLO;
 }
 
 // === Start LED Animation ===
@@ -304,12 +319,33 @@ void onRequest() {
 
 // === UTILS ===
 void setStripColor(uint8_t r, uint8_t g, uint8_t b) {
-  // for (int i = 0; i < NUM_LEDS; i++) {
-  //   strip.setPixelColor(i, strip.Color(r, g, b));
-  // }
-  // strip.show();
   for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(r, g, b)); // bianco
+    strip.setPixelColor(i, strip.Color(r, g, b));  // bianco
   }
   strip.show();
+}
+
+void sayHelloAction() {
+  int angle = armDirectionDown ? 180 : 145;
+  if (armStep % 2 == 0) armServoSx.write(angle);
+  else armServoDx.write(angle);
+
+  lastArmMoveTime = millis();
+  armStep++;
+
+  if (armStep >= 12) {
+    armAction = NONE_ARM;
+    startHeadMovement();
+  } else if (armStep % 2 == 0) {
+    armDirectionDown = !armDirectionDown;
+  }
+}
+
+void headPettingAction() {
+  headServo.write(headAngles[headStep]);
+  lastHeadMoveTime = millis();
+  headStep++;
+  if (headStep >= sizeof(headAngles) / sizeof(headAngles[0])) {
+    headAction = NONE_HEAD;
+  }
 }
