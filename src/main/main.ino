@@ -229,7 +229,7 @@ void loop() {
   if (ledAnimating && millis() - lastLedUpdate >= ledUpdateInterval) {
     Serial.println("Led");
     lastLedUpdate = millis();
-    setStripColor(0,0,0);
+    setStripColor(255,255,255);
     // if (ledMode == 0) {
     //   setStripColor((ledAnimationStep % 2) * 255, (ledAnimationStep % 2) * 255, (ledAnimationStep % 2) * 255);
     // } else if (ledMode == 1) {
@@ -241,7 +241,9 @@ void loop() {
     // }
 
     ledAnimationStep++;
-    if (ledAnimationStep >= 4) {
+    if (ledAnimationStep >= 10) {
+      setStripColor(0, 0, 0);
+      headServo.write(0);
       ledAnimating = false;
     }
   }
@@ -307,7 +309,7 @@ void setStripColor(uint8_t r, uint8_t g, uint8_t b) {
   // }
   // strip.show();
   for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(255, 255, 255)); // bianco
+    strip.setPixelColor(i, strip.Color(r, g, b)); // bianco
   }
   strip.show();
 }
