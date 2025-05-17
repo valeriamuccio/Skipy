@@ -22,9 +22,10 @@
 // === Communication I2C ===
 #define MY_ADDR 3
 
-// === State Machine ===
+// === States ===
 enum RobotState {
   IDLE,
+  IS_MOVING,
   GREET_PERSON,
   SEEK_INTERACTION,
   AWAIT_BALL,
@@ -34,12 +35,15 @@ enum RobotState {
 
 enum ArmMotorsActions {
   NONE_ARM,
-  HELLO
+  HELLO,
+  SMALL_SHAKE
 };
 
 enum HeadMotorsActions {
   NONE_HEAD,
-  PET
+  PET,
+  RESET_POSITION,
+  SMALL_SHAKE_HEAD
 };
 
 RobotState state = IDLE;
@@ -67,20 +71,18 @@ Servo armServoDx;
 Servo headServo;
 
 // === Queue handling variables ===
+const int totalTracks = 10;  // Total number of tracks in the folder (adjust as needed)
 bool buttonPressed = false;
-bool headTouched = false;
 int currentTrack = 0;
-int totalTracks = 10;  // Total number of tracks in the folder (adjust as needed)
 int currentQueuePos = 0;
 int headTouchAttempt = 0;
-long distance;
 const unsigned long detectionCooldown = 60000;  // 1 minute
 unsigned long lastDetectionTime = 0;
 unsigned long headTouchStartTime = 0;
 unsigned long lastQueueCallTime = 0;
 
 // === HEAD Movement State ===
-int headAngles[] = { 0, 0, 0, 5, 10, 15, 20, 25, 30 };
+int currentHeadAngle = 0;
 int headStep = 0;
 unsigned long lastHeadMoveTime = 0;
 const unsigned long headStepDelay = 80;
@@ -88,15 +90,14 @@ const unsigned long headStepDelay = 80;
 // === ARM Movement State ===
 int armStep = 0;
 unsigned long lastArmMoveTime = 0;
-const unsigned long armStepDelay = 50;
+const unsigned long armStepDelay = 80;
 bool armDirectionDown = true;
 
 // === LED Animation State ===
 unsigned long lastLedUpdate = 0;
-const unsigned long ledUpdateInterval = 200;  // ms tra i cambi
+const unsigned long ledUpdateInterval = 200;
 int ledAnimationStep = 0;
 bool ledAnimating = false;
-int ledMode = 0;  // 0 = white ON/OFF, 1 = green/blue
 
 // === Setup ===
 void setup() {
@@ -119,9 +120,9 @@ void setup() {
   pinMode(TX_PIN, OUTPUT);
 
   if (!mp3.begin(mp3Serial)) {
-    Serial.println("Unable to begin MP3 player. Check connections.");
+    Serial.println("Unable to begin MP3 player. Check connections and reset robot.");
     while (true)
-      ;  // Stop everything
+      ;
   }
   mp3.setTimeOut(500);
   mp3.volume(30);
@@ -129,7 +130,7 @@ void setup() {
 
   strip.begin();
   strip.show();
-  Serial.println("MP3 player ready.");
+  Serial.println("Robot ready.");
 }
 
 // === Main Loop ===
@@ -137,30 +138,33 @@ void loop() {
   checkIfButtonPressed();
 
   switch (state) {
+    case IS_MOVING: 
+      break; //add random sounds after a while
     case IDLE:
-      distance = sr04.Distance();
       if (currentQueuePos != currentTrack || millis() - lastQueueCallTime > 50000) {
         state = CALL_NEXT;
         lastQueueCallTime = millis();
         Serial.println(">> Current queue pos != current track or expired");
-      } else if (distance > 0 && distance < DISTANCE_THRESHOLD) {  //&& millis() - lastDetectionTime > detectionCooldown) {  //if last time detectione expired
-        headServo.write(10);
-        state = GREET_PERSON;
-        lastDetectionTime = millis();
-        Serial.println(">> Person detected close to the robot");
+      } else {
+        long distance = sr04.Distance();
+        if (distance > 0 && distance < DISTANCE_THRESHOLD) {
+          state = GREET_PERSON;
+          lastDetectionTime = millis();
+          Serial.println(">> Person detected close to the robot");
+        }
       }
       break;
 
     case GREET_PERSON:
-      headServo.write(10);
+      currentHeadAngle = 10;  //default position
+      headServo.write(currentHeadAngle);
       Serial.println(">> Greeting person");
-      performGreetings();
+      performGreetingsAction();
       state = SEEK_INTERACTION;
       headTouchStartTime = millis();
       break;
 
     case AWAIT_BALL:
-      //check message for the ball
       Serial.println(state);
       delay(1000);
       Serial.println(">> Waiting for ball message");
@@ -170,7 +174,8 @@ void loop() {
     case CELEBRATE:
       Serial.println(">> Celebrating new ball!");
       delay(1000);
-      startLedAnimation(1);
+      startHeadMovement(RESET_POSITION);
+      startLedAnimation();
       state = IDLE;
       break;
 
@@ -179,13 +184,13 @@ void loop() {
       Serial.println(">> Calling next number in queue");
       // Play the music and perform the servo action
       //mp3.playFolder(2, currentTrack); // Folder 01, Track 001.mp3
-      mp3.play(1);
+      mp3.playFolder(1, 1);
       delay(1000);  // Or wait for track to finish (can be improved) REMOVE??
       if (currentTrack > totalTracks) {
         currentTrack = 0;  // Reset to the first track
       }
       currentTrack = currentQueuePos;
-      startLedAnimation(2);
+      startLedAnimation();
       Serial.println(currentTrack, currentQueuePos);
       state = IDLE;
       break;
@@ -198,41 +203,17 @@ void loop() {
       touchValue = cs.capacitiveSensor(30);
       Serial.println(touchValue);
       delay(80);
-      if (touchValue > 400) {
+      if (touchValue > 500) {
         Serial.println(">> Head touched!");
-        headServo.write(25);
-        delay(50);
-        headServo.write(15);
-        delay(50);
-        headServo.write(10);
-
         //If yes, send event to other modules and animation with led white , then state AWAIT_BALL
         state = AWAIT_BALL;
-      }else if (headTouchAttempt > 5) {
+      } else if (headTouchAttempt > 5) {
         Serial.println(">> Timeout, head not touched.");
         state = IDLE;
-      }
-      else if (millis() - headTouchStartTime > 3000) {
-        headServo.write(25);
-        armServoDx.write(180);
-        delay(100);
-        headServo.write(30);
-        armServoDx.write(170);
-        delay(100);
-        headServo.write(25);
-        armServoDx.write(180);
-        delay(100);
-         headServo.write(25);
-        armServoDx.write(180);
-        delay(100);
-        headServo.write(30);
-        armServoDx.write(170);
-        delay(100);
-        headServo.write(25);
-        armServoDx.write(180);
-        delay(100);
-        headTouchStartTime = millis();
+      } else if (millis() - headTouchStartTime > 3000) {
+        indicateHeadAction();
         headTouchAttempt++;
+        headTouchStartTime = millis();
         break;
       };
       headTouchAttempt = 0;
@@ -244,25 +225,20 @@ void loop() {
   // === HEAD MOVEMENT HANDLER ===
   if (headAction != NONE_HEAD && millis() - lastHeadMoveTime >= headStepDelay) {
     if (headAction == PET) { headPettingAction(); }
+    if (headAction == RESET_POSITION) { resetHeadPositionAction(); }
+    if (headAction == SMALL_SHAKE_HEAD) { headSmallShakeAction(); }
   }
 
   // === ARM MOVEMENT HANDLER ===
   if (armAction != NONE_ARM && millis() - lastArmMoveTime >= armStepDelay) {
     if (armAction == HELLO) { sayHelloAction(); }
+    if (armAction == SMALL_SHAKE) { smallShakeAction(); }
   }
 
   // === LED HANDLER ===
   if (ledAnimating && millis() - lastLedUpdate >= ledUpdateInterval) {
     Serial.println("Led");
-    lastLedUpdate = millis();
-    setStripColor(255, 255, 255);
-
-    ledAnimationStep++;
-    if (ledAnimationStep >= 10) {
-      setStripColor(0, 0, 0);
-      headServo.write(10);
-      ledAnimating = false;
-    }
+    ledAnimationAction();
   }
 }
 
@@ -271,58 +247,20 @@ void checkIfButtonPressed() {
   buttonPressed = digitalRead(BUTTON_PIN) == LOW;
   delay(50);
   if (buttonPressed) {
+    mp3.playFolder(1, 5);
+    delay(80);
+    Serial.println(currentQueuePos);
     currentQueuePos++;
   }
 }
 
 // === Actions ===
-void performGreetings() {
+void performGreetingsAction() {
   Serial.println("Start greetings...");
-  mp3.play(3);
+  mp3.playFolder(1, 3);
+  delay(80);
   Serial.println("Play track");
-  delay(1000);  //TODO: can it be removed??
-  startArmMovement();
-}
-
-// === Start HEAD Movement ===
-void startHeadMovement() {
-  headStep = 0;
-  lastHeadMoveTime = millis();
-  headAction = PET;
-}
-
-// === Start ARM Movement ===
-void startArmMovement() {
-  armStep = 0;
-  lastArmMoveTime = millis();
-  armDirectionDown = true;
-  armAction = HELLO;
-}
-
-// === Start LED Animation ===
-void startLedAnimation(int mode) {
-  ledMode = mode;
-  ledAnimationStep = 0;
-  ledAnimating = true;
-  lastLedUpdate = millis();
-}
-
-// === COMMUNICATION ===
-void onReceive() {
-  Serial.println("onReceive");
-}
-
-void onRequest() {
-  Serial.println("onRequest");
-}
-
-
-// === UTILS ===
-void setStripColor(uint8_t r, uint8_t g, uint8_t b) {
-  for (int i = 0; i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, strip.Color(r, g, b));  // bianco
-  }
-  strip.show();
+  startArmMovement(HELLO);
 }
 
 void sayHelloAction() {
@@ -335,17 +273,120 @@ void sayHelloAction() {
 
   if (armStep >= 12) {
     armAction = NONE_ARM;
-    startHeadMovement();
+    startHeadMovement(PET);
+  } else if (armStep % 2 == 0) {
+    armDirectionDown = !armDirectionDown;
+  }
+}
+
+void smallShakeAction() {
+  int angle = armDirectionDown ? 180 : 170;
+  if (armStep % 2 == 0) armServoSx.write(angle);
+  else armServoDx.write(angle);
+
+  lastArmMoveTime = millis();
+  armStep++;
+
+  if (armStep >= 6) {
+    armAction = NONE_ARM;
   } else if (armStep % 2 == 0) {
     armDirectionDown = !armDirectionDown;
   }
 }
 
 void headPettingAction() {
-  headServo.write(headAngles[headStep]);
+  currentHeadAngle = currentHeadAngle + 5;
+  headServo.write(currentHeadAngle);
   lastHeadMoveTime = millis();
-  headStep++;
-  if (headStep >= sizeof(headAngles) / sizeof(headAngles[0])) {
+  if (currentHeadAngle == 35) {
     headAction = NONE_HEAD;
   }
+}
+
+void resetHeadPositionAction() {
+  currentHeadAngle = currentHeadAngle - 5;
+  headServo.write(currentHeadAngle);
+  lastHeadMoveTime = millis();
+  if (currentHeadAngle == 0) {
+    headAction = NONE_HEAD;
+  }
+}
+
+void headSmallShakeAction() {
+  currentHeadAngle = currentHeadAngle != 25 ? 25 : 30;
+  headServo.write(currentHeadAngle);
+  lastHeadMoveTime = millis();
+  headStep++;
+  if (headStep > 6) {
+    headAction = NONE_HEAD;
+  }
+}
+
+void indicateHeadAction() {
+  startArmMovement(SMALL_SHAKE);
+  startHeadMovement(SMALL_SHAKE_HEAD);
+}
+
+void ledAnimationAction() {
+  lastLedUpdate = millis();
+  setStripColor(0, 255, 0);
+  ledAnimationStep++;
+  if (ledAnimationStep >= 15) {
+    setStripColor(0, 0, 0);
+    ledAnimating = false;
+  }
+}
+
+// === HEAD Movement ===
+void startHeadMovement(HeadMotorsActions action) {
+  //lastHeadMoveTime = millis();
+  headAction = action;
+  headStep = 0;
+}
+
+// === ARM Movement ===
+void startArmMovement(ArmMotorsActions action) {
+  armStep = 0;
+  //lastArmMoveTime = millis();
+  armDirectionDown = true;
+  armAction = action;
+}
+
+// === Start LED Animation ===
+void startLedAnimation() {
+  ledAnimationStep = 0;
+  ledAnimating = true;
+  //lastLedUpdate = millis();
+}
+
+// === COMMUNICATION ===
+void onReceive() {
+  Serial.println("onReceive");
+  //read message
+  //if robotIsMoving --> do nothing except number update
+  //if robotStop --> IDLE
+  //if ball message -> CELEBRATE, after 8 times ... I can call new number in queue
+
+  //uint8_t idx = 0;
+  // while (Wire.available() && idx < sizeof(inBuf)) {
+  //   inBuf[idx++] = Wire.read();
+  // }
+  // inLen    = idx;
+  // msgReady = true;
+}
+
+void onRequest() {
+  Serial.println("onRequest");
+  //If HeadTouched --> send it during AWAIT_BALL
+  
+  //Wire.write((uint8_t*)outBuf, outLen);
+}
+
+
+// === UTILS ===
+void setStripColor(uint8_t r, uint8_t g, uint8_t b) {
+  for (int i = 0; i < NUM_LEDS; i++) {
+    strip.setPixelColor(i, strip.Color(r, g, b));
+  }
+  strip.show();
 }
