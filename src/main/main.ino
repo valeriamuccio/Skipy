@@ -20,17 +20,35 @@
 #define LED_STRIP_PIN 13
 
 // === Communication I2C ===
-#define MY_ADDR 3
+const uint8_t MY_ADDR = 0b011;
+
+// —— Commands ——
+//GENERAL
+const uint8_t MASTER_ADDR = 0b001;
+const uint8_t START_SYS_CMD = 0b00001;  //M → L,C,A
+const uint8_t STOP_SYS_CMD = 0b11111;   //M → L,C,A
+
+const uint8_t ASK_READY_CMD = 0b00011;   //M → L,C,A
+const uint8_t TELL_READY_CMD = 0b11100;  //M ← L,C,A
+
+//COMMUNICATION
+const uint8_t START_INTERACTION_CMD = 0b01000;    //M → C
+const uint8_t STARTED_INTERACTION_CMD = 0b00100;  //M ← C
+const uint8_t ENDED_INTERACTION_CMD = 0b01111;    //M ← C
+const uint8_t NOTIFY_HEADTOUCH_CMD = 0b01001;     //M ← C !!!
+const uint8_t NOTIFY_LUCKYBALL_CMD = 0b01010;     //M → C !!!
+const uint8_t NOTIFY_NORMALBALL_CMD = 0b01011;    //M → C !!!
 
 // === States ===
 enum RobotState {
   IDLE,
-  IS_MOVING,
+  INITIAL_INTERACTION,
   GREET_PERSON,
   SEEK_INTERACTION,
   AWAIT_BALL,
   CELEBRATE,
-  CALL_NEXT
+  CALL_NEXT,
+  END_INTERACTION
 };
 
 enum ArmMotorsActions {
@@ -60,6 +78,8 @@ Adafruit_NeoPixel strip(NUM_LEDS, LED_STRIP_PIN, NEO_GRB + NEO_KHZ800);
 // === Ultrasonic Sensor ===
 const int DISTANCE_THRESHOLD = 5;  //TODO: Change to 50 later
 SR04 sr04 = SR04(ECHO_PIN, TRIG_PIN);
+
+boolean hasMsg = false;
 
 // === MP3 Player ===
 DFRobotDFPlayerMini mp3;
@@ -102,9 +122,9 @@ bool ledAnimating = false;
 // === Setup ===
 void setup() {
   Serial.begin(9600);
-  mp3Serial.begin(9600);
+  //mp3Serial.begin(9600);
 
-  Wire.begin(MY_ADDR);
+  Wire.begin(3);
   Wire.onReceive(onReceive);
   Wire.onRequest(onRequest);
 
@@ -119,17 +139,21 @@ void setup() {
   pinMode(RX_PIN, INPUT);
   pinMode(TX_PIN, OUTPUT);
 
-  if (!mp3.begin(mp3Serial)) {
-    Serial.println("Unable to begin MP3 player. Check connections and reset robot.");
-    while (true)
-      ;
-  }
-  mp3.setTimeOut(500);
-  mp3.volume(30);
-  mp3.EQ(DFPLAYER_EQ_NORMAL);
-
   strip.begin();
   strip.show();
+
+  // if (!mp3.begin(mp3Serial)) {
+  //   Serial.println("Unable to begin MP3 player. Check connections and reset robot.");  //LED ROSSI
+  //   setStripColor(255, 0, 0);
+  //   strip.show();
+
+  //   while (true)
+  //     ;
+  // }
+  // mp3.setTimeOut(500);
+  // mp3.volume(30);
+  // mp3.EQ(DFPLAYER_EQ_NORMAL);
+
   Serial.println("Robot ready.");
 }
 
@@ -138,23 +162,23 @@ void loop() {
   checkIfButtonPressed();
 
   switch (state) {
-    case IS_MOVING: 
-      break; //add random sounds after a while
     case IDLE:
+      //nothing
+      break;
+    case INITIAL_INTERACTION:
       if (currentQueuePos != currentTrack || millis() - lastQueueCallTime > 50000) {
         state = CALL_NEXT;
         lastQueueCallTime = millis();
         Serial.println(">> Current queue pos != current track or expired");
       } else {
         long distance = sr04.Distance();
-        if (distance > 0 && distance < DISTANCE_THRESHOLD) {
+        if (true) {
           state = GREET_PERSON;
           lastDetectionTime = millis();
           Serial.println(">> Person detected close to the robot");
         }
       }
       break;
-
     case GREET_PERSON:
       currentHeadAngle = 10;  //default position
       headServo.write(currentHeadAngle);
@@ -166,9 +190,8 @@ void loop() {
 
     case AWAIT_BALL:
       Serial.println(state);
-      delay(1000);
       Serial.println(">> Waiting for ball message");
-      state = CELEBRATE;
+      //state = CELEBRATE;
       break;
 
     case CELEBRATE:
@@ -176,7 +199,8 @@ void loop() {
       delay(1000);
       startHeadMovement(RESET_POSITION);
       startLedAnimation();
-      state = IDLE;
+      state = END_INTERACTION;
+      hasMsg = true;
       break;
 
 
@@ -184,7 +208,7 @@ void loop() {
       Serial.println(">> Calling next number in queue");
       // Play the music and perform the servo action
       //mp3.playFolder(2, currentTrack); // Folder 01, Track 001.mp3
-      mp3.playFolder(1, 1);
+      // mp3.playFolder(1, 1);
       delay(1000);  // Or wait for track to finish (can be improved) REMOVE??
       if (currentTrack > totalTracks) {
         currentTrack = 0;  // Reset to the first track
@@ -192,6 +216,11 @@ void loop() {
       currentTrack = currentQueuePos;
       startLedAnimation();
       Serial.println(currentTrack, currentQueuePos);
+      state = IDLE;
+      break;
+
+    case END_INTERACTION:
+      //manda messaggio, aspetta, dopo passa a IDLE
       state = IDLE;
       break;
 
@@ -203,13 +232,14 @@ void loop() {
       touchValue = cs.capacitiveSensor(30);
       Serial.println(touchValue);
       delay(80);
-      if (touchValue > 500) {
+      if (true) {
         Serial.println(">> Head touched!");
         //If yes, send event to other modules and animation with led white , then state AWAIT_BALL
+        hasMsg = true;
         state = AWAIT_BALL;
       } else if (headTouchAttempt > 5) {
         Serial.println(">> Timeout, head not touched.");
-        state = IDLE;
+        state = END_INTERACTION;
       } else if (millis() - headTouchStartTime > 3000) {
         indicateHeadAction();
         headTouchAttempt++;
@@ -247,7 +277,7 @@ void checkIfButtonPressed() {
   buttonPressed = digitalRead(BUTTON_PIN) == LOW;
   delay(50);
   if (buttonPressed) {
-    mp3.playFolder(1, 5);
+    // mp3.playFolder(1, 5);
     delay(80);
     Serial.println(currentQueuePos);
     currentQueuePos++;
@@ -257,7 +287,7 @@ void checkIfButtonPressed() {
 // === Actions ===
 void performGreetingsAction() {
   Serial.println("Start greetings...");
-  mp3.playFolder(1, 3);
+  //mp3.playFolder(1, 3);
   delay(80);
   Serial.println("Play track");
   startArmMovement(HELLO);
@@ -360,26 +390,38 @@ void startLedAnimation() {
 }
 
 // === COMMUNICATION ===
-void onReceive() {
+void onReceive(int) {
   Serial.println("onReceive");
-  //read message
-  //if robotIsMoving --> do nothing except number update
-  //if robotStop --> IDLE
-  //if ball message -> CELEBRATE, after 8 times ... I can call new number in queue
+  if (Wire.available()) {
+    uint8_t v = Wire.read();
+    uint8_t dest = v >> 5;
+    uint8_t cmd = v & 0x1F;
+    String bits = byteToBitString(v);
+    Serial.print(" (dest=");
+    Serial.print(dest);
+    Serial.print("): ");
+    Serial.println(bits);
 
-  //uint8_t idx = 0;
-  // while (Wire.available() && idx < sizeof(inBuf)) {
-  //   inBuf[idx++] = Wire.read();
-  // }
-  // inLen    = idx;
-  // msgReady = true;
+    handle_message(v);
+  }
 }
 
 void onRequest() {
-  Serial.println("onRequest");
   //If HeadTouched --> send it during AWAIT_BALL
-  
-  //Wire.write((uint8_t*)outBuf, outLen);
+  if (state == AWAIT_BALL && hasMsg) {
+    uint8_t msg = (MASTER_ADDR << 5) | NOTIFY_HEADTOUCH_CMD;
+    Wire.write(msg);
+    Serial.println("Inviato msg");
+    Serial.println(msg);
+    hasMsg = false;
+  }
+  if ((state == END_INTERACTION || CELEBRATE) && hasMsg) {
+    uint8_t msg = (MASTER_ADDR << 5) | ENDED_INTERACTION_CMD;
+    Wire.write(msg);
+    Serial.println("Inviato msg");
+    Serial.println(msg);
+    hasMsg = false;
+  }
 }
 
 
@@ -389,4 +431,47 @@ void setStripColor(uint8_t r, uint8_t g, uint8_t b) {
     strip.setPixelColor(i, strip.Color(r, g, b));
   }
   strip.show();
+}
+
+String byteToBitString(uint8_t v) {
+  String r;
+  for (int8_t i = 7; i >= 0; i--) r += char('0' + ((v >> i) & 1));
+  return r;
+}
+
+// — New function: split, match, act —
+void handle_message(uint8_t raw) {
+  uint8_t dest = raw >> 5;
+  uint8_t cmd = raw & 0x1F;
+  // only handle messages addressed to me:
+  if (dest != MY_ADDR) return;
+
+  switch (cmd) {
+    case START_INTERACTION_CMD:
+      //It's possible to start interation
+      Serial.println(">>> START_INTERACTION_CMD received");
+      state = INITIAL_INTERACTION;
+      break;
+
+    case NOTIFY_LUCKYBALL_CMD:
+      // Lucky ball has been extracted by actuation2
+      // Forward the message to communication
+      Serial.println(">>> DETECTED_LUCKYBALL_CMD received");
+      state = CELEBRATE;
+      //SET state select music and so on
+      break;
+
+    case NOTIFY_NORMALBALL_CMD:
+      // Normal ball has been extracted by actuation2
+      // Forward the message to communication
+      Serial.println(">>> DETECTED_NORMALBALL_CMD received");
+      state = CELEBRATE;
+      //SET state select music and so on
+      break;
+
+    default:
+      Serial.print("Ignored message");
+      Serial.println(cmd);
+      break;
+  }
 }
