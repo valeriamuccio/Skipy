@@ -165,7 +165,7 @@ void loop() {
       //nothing
       break;
     case INITIAL_INTERACTION:
-      if (currentQueuePos >= currentTrack && (isMicrowaveAvailable || millis() - lastQueueCallTime > microwaveTimeout)) {
+      if (currentQueuePos >= currentTrack && (isMicrowaveAvailable)) {
         lastQueueCallTime = millis();
         isMicrowaveAvailable = false;
         startLedAnimation(0, 255, 0);
@@ -204,7 +204,7 @@ void loop() {
       delay(100);
       startLedAnimation(175, 0, 183);
       headServo.write(0);
-      delay(100);
+      delay(1000);
       hasMsg = true;
       break;
 
@@ -212,7 +212,7 @@ void loop() {
       Serial.println(">> Calling next number in queue");
       for (int i = 0; i < 2; i++) {
         mp3.playFolder(2, currentTrack);
-        delay(500);
+        delay(1000);
       }
       currentTrack++;
       if (currentTrack > totalTracks) {
@@ -225,6 +225,7 @@ void loop() {
 
     case END_INTERACTION:
       state = IDLE;
+      delay(1000);
       //if (!hasMsg) state = IDLE;
       break;
 
