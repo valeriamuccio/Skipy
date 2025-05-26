@@ -161,23 +161,20 @@ void loop() {
 
   switch (state) {
     case IDLE:
-      state = INITIAL_INTERACTION;
-      //nothing
-      break;
-    case INITIAL_INTERACTION:
-      if (currentQueuePos >= currentTrack && (isMicrowaveAvailable)) {
+      if (currentQueuePos >= currentTrack && (isMicrowaveAvailable || millis() - lastQueueCallTime > microwaveTimeout)) {
         lastQueueCallTime = millis();
         isMicrowaveAvailable = false;
         startLedAnimation(0, 255, 0);
         state = CALL_NEXT;
         Serial.println(">> Current queue pos != current track or expired");
-      } else {
-        long distance = sr04.Distance();
-        if (distance > 0 && distance < 10) {
-          lastDetectionTime = millis();
-          state = GREET_PERSON;
-          Serial.println(">> Person detected close to the robot");
-        }
+      }
+      break;
+    case INITIAL_INTERACTION:
+      long distance = sr04.Distance();
+      if (distance > 0 && distance < DISTANCE_THRESHOLD) {
+        lastDetectionTime = millis();
+        state = GREET_PERSON;
+        Serial.println(">> Person detected close to the robot");
       }
       break;
 
@@ -192,7 +189,6 @@ void loop() {
 
     case AWAIT_BALL:
       Serial.println(">> Waiting for ball message");
-      state = CELEBRATE; //TODO remove
       break;
 
     case CELEBRATE:
@@ -224,9 +220,7 @@ void loop() {
       break;
 
     case END_INTERACTION:
-      state = IDLE;
-      delay(1000);
-      //if (!hasMsg) state = IDLE;
+      if (!hasMsg) state = IDLE;
       break;
 
     case SEEK_INTERACTION:
