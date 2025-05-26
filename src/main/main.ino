@@ -7,10 +7,10 @@
 #include <Wire.h>
 
 // === Pin Definitions ===
-#define BUTTON_PIN 6
 #define ECHO_PIN 3
 #define TRIG_PIN 4
 #define CAPACITIVE_SENSOR_RECEIVE_PIN 5
+#define BUTTON_PIN 6
 #define CAPACITIVE_SENSOR_SEND_PIN 7
 #define HEAD_SERVO_PIN 8
 #define DX_SERVO_PIN 9
@@ -25,8 +25,6 @@ const uint8_t MY_ADDR = 0b011;
 // —— Commands ——
 //GENERAL
 const uint8_t MASTER_ADDR = 0b001;
-const uint8_t START_SYS_CMD = 0b00001;   //M → L,C,A
-const uint8_t STOP_SYS_CMD = 0b11111;    //M → L,C,A
 const uint8_t ASK_READY_CMD = 0b00011;   //M → L,C,A
 const uint8_t TELL_READY_CMD = 0b11100;  //M ← L,C,A
 
@@ -67,6 +65,9 @@ RobotState state = IDLE;
 ArmMotorsActions armAction = NONE_ARM;
 HeadMotorsActions headAction = NONE_HEAD;
 
+// === Communication ===
+bool hasMsg = false;
+
 // === Touch Sensor ===
 CapacitiveSensor cs = CapacitiveSensor(CAPACITIVE_SENSOR_SEND_PIN, CAPACITIVE_SENSOR_RECEIVE_PIN);
 
@@ -78,8 +79,6 @@ Adafruit_NeoPixel strip(NUM_LEDS, LED_STRIP_PIN, NEO_GRB + NEO_KHZ800);
 const int DISTANCE_THRESHOLD = 50;
 SR04 sr04 = SR04(ECHO_PIN, TRIG_PIN);
 
-boolean hasMsg = false;
-
 // === MP3 Player ===
 DFRobotDFPlayerMini mp3;
 SoftwareSerial mp3Serial(RX_PIN, TX_PIN);
@@ -90,12 +89,12 @@ Servo armServoDx;
 Servo headServo;
 
 // === Queue handling variables ===
-const int totalTracks = 30;  // Total number of tracks in the folder (adjust as needed)
-bool buttonPressed = false;
+const unsigned long microwaveTimeout = 60000;
+const int totalTracks = 30;
 int currentTrack = 0;
 int currentQueuePos = 0;
+bool isMicrowaveAvailable = false;
 int headTouchAttempt = 0;
-const unsigned long detectionCooldown = 60000;
 unsigned long lastDetectionTime = 0;
 unsigned long headTouchStartTime = 0;
 unsigned long lastQueueCallTime = 0;
@@ -104,7 +103,7 @@ unsigned long lastQueueCallTime = 0;
 int currentHeadAngle = 0;
 int headStep = 0;
 unsigned long lastHeadMoveTime = 0;
-const unsigned long headStepDelay = 100;
+const unsigned long headStepDelay = 80;
 
 // === ARM Movement State ===
 int armStep = 0;
@@ -142,7 +141,7 @@ void setup() {
   strip.show();
 
   if (!mp3.begin(mp3Serial)) {
-    Serial.println("Unable to begin MP3 player. Check connections and reset robot.");  //LED ROSSI
+    Serial.println("Unable to begin MP3 player. Check connections and reset robot.");
     setStripColor(255, 0, 0);
     strip.show();
 
@@ -162,33 +161,33 @@ void loop() {
 
   switch (state) {
     case IDLE:
-      //nothing
-      break;
-    case INITIAL_INTERACTION:
-      if (currentQueuePos != currentTrack || millis() - lastQueueCallTime > 50000) {
-        state = CALL_NEXT;
+      if (currentPosQueue >= currentTrack && (isMicrowaveAvailable || millis() - lastQueueCallTime > microwaveTimeout)) {
         lastQueueCallTime = millis();
+        isMicrowaveAvailable = false;
+        startLedAnimation(0, 255, 0);
+        state = CALL_NEXT;
         Serial.println(">> Current queue pos != current track or expired");
-      } else {
-        long distance = sr04.Distance();
-        if (distance > 0 && distance < DISTANCE_THRESHOLD) {
-          state = GREET_PERSON;
-          lastDetectionTime = millis();
-          Serial.println(">> Person detected close to the robot");
-        }
       }
       break;
+    case INITIAL_INTERACTION:
+      long distance = sr04.Distance();
+      if (distance > 0 && distance < DISTANCE_THRESHOLD) {
+        lastDetectionTime = millis();
+        state = GREET_PERSON;
+        Serial.println(">> Person detected close to the robot");
+      }
+      break;
+
     case GREET_PERSON:
       headServo.write(0);
       delay(100);
-      Serial.println(">> Greeting person");
       performGreetingsAction();
-      state = SEEK_INTERACTION;
       headTouchStartTime = millis();
+      state = SEEK_INTERACTION;
+      Serial.println(">> Greeting person");
       break;
 
     case AWAIT_BALL:
-      Serial.println(state);
       Serial.println(">> Waiting for ball message");
       state = CELEBRATE;
       break;
@@ -197,47 +196,50 @@ void loop() {
       Serial.println(">> Celebrating new ball!");
       delay(1000);
       startHeadMovement(RESET_POSITION);
-      startLedAnimation();
       state = END_INTERACTION;
       headServo.write(0);
       delay(100);
       hasMsg = true;
       break;
 
-
     case CALL_NEXT:
       Serial.println(">> Calling next number in queue");
-      mp3.playFolder(2, currentTrack);
-      delay(1000);
-      if (currentTrack > totalTracks) {
-        currentTrack = 0;
+      for (int i = 0; i < 2; i++) {
+        mp3.playFolder(2, currentTrack);
+        delay(500);
       }
-      currentTrack = currentQueuePos;
-      startLedAnimation();
-      Serial.println(currentTrack, currentQueuePos);
+      currentTrack++;
+      if (currentTrack > totalTracks) {
+        currentTrack = 1;
+        currentQueuePos = 1;
+      }
       state = IDLE;
+      Serial.println(currentTrack, currentQueuePos);
       break;
 
     case END_INTERACTION:
-      if(!hasMsg) state = IDLE;
+      if (!hasMsg) state = IDLE;
       break;
 
     case SEEK_INTERACTION:
       if (headAction != NONE_HEAD || armAction != NONE_HEAD) break;
-      Serial.println(">> Wait head touch");
-      long touchValue = 0;
-      touchValue = cs.capacitiveSensor(30);
+      Serial.println(">> Wait for head to be touched");
+      long touchValue = cs.capacitiveSensor(30);
       Serial.println(touchValue);
       delay(80);
       if (touchValue > 100) {
         Serial.println(">> Head touched!");
         hasMsg = true;
+        currentQueuePos++;
+        mp3.playFolder(1, 7);
+        delay(100);
         state = AWAIT_BALL;
-        mp3.playFolder(1,7);
-        delay(80);
+        headTouchAttempt = 0;
       } else if (headTouchAttempt > 5) {
         headServo.write(0);
         Serial.println(">> Timeout, head not touched.");
+        hasMsg = true;
+        headTouchAttempt = 0;
         state = END_INTERACTION;
       } else if (millis() - headTouchStartTime > 3000) {
         mp3.playFolder(1, 2);
@@ -246,8 +248,7 @@ void loop() {
         headTouchStartTime = millis();
         break;
       };
-      headTouchAttempt = 0;
-      Serial.println("exit seek interaction");
+      Serial.println("seeking interaction");
       break;
   }
 
@@ -267,20 +268,19 @@ void loop() {
 
   // === LED HANDLER ===
   if (ledAnimating && millis() - lastLedUpdate >= ledUpdateInterval) {
-    Serial.println("Led");
-    ledAnimationAction(0, 0, 0);
+    ledAnimationAction(0, 255, 0);
   }
 }
 
 // === Check input ===
 void checkIfButtonPressed() {
-  buttonPressed = digitalRead(BUTTON_PIN) == LOW;
+  bool buttonPressed = digitalRead(BUTTON_PIN) == LOW;
   delay(100);
   if (buttonPressed) {
     mp3.playFolder(1, 6);
     delay(80);
     Serial.println(currentQueuePos);
-    currentQueuePos++;
+    isMicrowaveAvailable = true;
   }
 }
 
@@ -343,7 +343,7 @@ void resetHeadPositionAction() {
 }
 
 void headSmallShakeAction() {
-  currentHeadAngle = currentHeadAngle != 10 ? 10 : 15;
+  currentHeadAngle = currentHeadAngle != 20 ? 20 : 25;
   headServo.write(currentHeadAngle);
   lastHeadMoveTime = millis();
   headStep++;
@@ -359,11 +359,9 @@ void indicateHeadAction() {
 }
 
 void ledAnimationAction(uint8_t r, uint8_t g, uint8_t b) {
-  lastLedUpdate = millis();
-  setStripColor(0, 255, 0);
   ledAnimationStep++;
   if (ledAnimationStep >= 15) {
-    setStripColor(r, g, b);
+    setStripColor(0, 0, 0);
     ledAnimating = false;
   }
 }
@@ -382,9 +380,11 @@ void startArmMovement(ArmMotorsActions action) {
 }
 
 // === Start LED Animation ===
-void startLedAnimation() {
+void startLedAnimation(uint8_t r, uint8_t g, uint8_t b) {
   ledAnimationStep = 0;
   ledAnimating = true;
+  lastLedUpdate = millis();
+  setStripColor(r, g, b);
 }
 
 // === COMMUNICATION ===
@@ -405,12 +405,11 @@ void onReceive(int) {
 }
 
 void onRequest() {
-  if (state == IDLE && hasMsg) {
+  if (state == IDLE) {
     uint8_t msg = (MASTER_ADDR << 5) | TELL_READY_CMD;
     Wire.write(msg);
     Serial.println("Sent msg");
     Serial.println(msg);
-    hasMsg = false;
   }
   if (state == AWAIT_BALL && hasMsg) {
     uint8_t msg = (MASTER_ADDR << 5) | NOTIFY_HEADTOUCH_CMD;
@@ -461,16 +460,18 @@ void handle_message(uint8_t raw) {
 
     case NOTIFY_LUCKYBALL_CMD:
       Serial.println(">>> DETECTED_LUCKYBALL_CMD received");
-      mp3.playFolder(1,9);
+      mp3.playFolder(1, 9);
       delay(100);
       state = CELEBRATE;
+      startLedAnimation(175, 0, 183);
       break;
 
     case NOTIFY_NORMALBALL_CMD:
       Serial.println(">>> DETECTED_NORMALBALL_CMD received");
-      mp3.playFolder(1,8);
+      mp3.playFolder(1, 8);
       delay(100);
       state = CELEBRATE;
+      startLedAnimation(214, 247, 1);
       break;
 
     default:
