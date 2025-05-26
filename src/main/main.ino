@@ -161,20 +161,23 @@ void loop() {
 
   switch (state) {
     case IDLE:
-      if (currentPosQueue >= currentTrack && (isMicrowaveAvailable || millis() - lastQueueCallTime > microwaveTimeout)) {
+      state = INITIAL_INTERACTION;
+      //nothing
+      break;
+    case INITIAL_INTERACTION:
+      if (currentQueuePos >= currentTrack && (isMicrowaveAvailable || millis() - lastQueueCallTime > microwaveTimeout)) {
         lastQueueCallTime = millis();
         isMicrowaveAvailable = false;
         startLedAnimation(0, 255, 0);
         state = CALL_NEXT;
         Serial.println(">> Current queue pos != current track or expired");
-      }
-      break;
-    case INITIAL_INTERACTION:
-      long distance = sr04.Distance();
-      if (distance > 0 && distance < DISTANCE_THRESHOLD) {
-        lastDetectionTime = millis();
-        state = GREET_PERSON;
-        Serial.println(">> Person detected close to the robot");
+      } else {
+        long distance = sr04.Distance();
+        if (distance > 0 && distance < 10) {
+          lastDetectionTime = millis();
+          state = GREET_PERSON;
+          Serial.println(">> Person detected close to the robot");
+        }
       }
       break;
 
@@ -189,14 +192,17 @@ void loop() {
 
     case AWAIT_BALL:
       Serial.println(">> Waiting for ball message");
-      state = CELEBRATE;
+      state = CELEBRATE; //TODO remove
       break;
 
     case CELEBRATE:
       Serial.println(">> Celebrating new ball!");
       delay(1000);
       startHeadMovement(RESET_POSITION);
-      state = END_INTERACTION;
+      state = IDLE;
+      mp3.playFolder(1, 9);
+      delay(100);
+      startLedAnimation(175, 0, 183);
       headServo.write(0);
       delay(100);
       hasMsg = true;
@@ -218,7 +224,8 @@ void loop() {
       break;
 
     case END_INTERACTION:
-      if (!hasMsg) state = IDLE;
+      state = IDLE;
+      //if (!hasMsg) state = IDLE;
       break;
 
     case SEEK_INTERACTION:
@@ -235,12 +242,12 @@ void loop() {
         delay(100);
         state = AWAIT_BALL;
         headTouchAttempt = 0;
-      } else if (headTouchAttempt > 5) {
+      } else if (headTouchAttempt > 8) {
         headServo.write(0);
         Serial.println(">> Timeout, head not touched.");
         hasMsg = true;
         headTouchAttempt = 0;
-        state = END_INTERACTION;
+        state = IDLE;
       } else if (millis() - headTouchStartTime > 3000) {
         mp3.playFolder(1, 2);
         indicateHeadAction();
@@ -278,7 +285,7 @@ void checkIfButtonPressed() {
   delay(100);
   if (buttonPressed) {
     mp3.playFolder(1, 6);
-    delay(80);
+    delay(500);
     Serial.println(currentQueuePos);
     isMicrowaveAvailable = true;
   }
@@ -348,7 +355,6 @@ void headSmallShakeAction() {
   lastHeadMoveTime = millis();
   headStep++;
   if (headStep > 6) {
-    headServo.write(0);
     headAction = NONE_HEAD;
   }
 }
