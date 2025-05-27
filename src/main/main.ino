@@ -90,6 +90,8 @@ Servo headServo;
 
 // === Queue handling variables ===
 const unsigned long microwaveTimeout = 60000;
+const unsigned long headTouchTimeout = 3000;
+const unsigned long headTouchMaxAttempt = 8;
 const int totalTracks = 30;
 int currentTrack = 0;
 int currentQueuePos = 0;
@@ -193,14 +195,11 @@ void loop() {
 
     case CELEBRATE:
       Serial.println(">> Celebrating new ball!");
-      delay(1000);
       startHeadMovement(RESET_POSITION);
-      state = IDLE;
+      state = END_INTERACTION;
       mp3.playFolder(1, 9);
       delay(100);
       startLedAnimation(175, 0, 183);
-      headServo.write(0);
-      delay(1000);
       hasMsg = true;
       break;
 
@@ -220,7 +219,10 @@ void loop() {
       break;
 
     case END_INTERACTION:
-      if (!hasMsg) state = IDLE;
+      if (!hasMsg) {
+        headServo.write(0);
+        state = IDLE;
+      }
       break;
 
     case SEEK_INTERACTION:
@@ -237,13 +239,13 @@ void loop() {
         delay(100);
         state = AWAIT_BALL;
         headTouchAttempt = 0;
-      } else if (headTouchAttempt > 8) {
+      } else if (headTouchAttempt > headTouchMaxAttempt) {
         headServo.write(0);
         Serial.println(">> Timeout, head not touched.");
         hasMsg = true;
         headTouchAttempt = 0;
-        state = IDLE;
-      } else if (millis() - headTouchStartTime > 3000) {
+        state = END_INTERACTION;
+      } else if (millis() - headTouchStartTime > headTouchTimeout) {
         mp3.playFolder(1, 2);
         indicateHeadAction();
         headTouchAttempt++;
