@@ -24,6 +24,7 @@ const uint8_t MY_ADDR = 0b011;
 
 // —— Commands ——
 //GENERAL
+const uint8_t GO_ACTIVE_CMD = 0b11000;   //M → L,C,A !!!
 const uint8_t MASTER_ADDR = 0b001;
 const uint8_t ASK_READY_CMD = 0b00011;   //M → L,C,A
 const uint8_t TELL_READY_CMD = 0b11100;  //M ← L,C,A
@@ -456,6 +457,11 @@ void handle_message(uint8_t raw) {
   if (dest != MY_ADDR) return;
 
   switch (cmd) {
+    case GO_ACTIVE_CMD:
+      Serial.println(">>> START_INTERACTION_CMD received");
+      state = INITIAL_INTERACTION;
+      break;
+
     case START_INTERACTION_CMD:
       Serial.println(">>> START_INTERACTION_CMD received");
       state = INITIAL_INTERACTION;
