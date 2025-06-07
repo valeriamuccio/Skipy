@@ -24,7 +24,7 @@ const uint8_t MY_ADDR = 0b011;
 
 // —— Commands ——
 //GENERAL
-const uint8_t GO_ACTIVE_CMD = 0b11000;   //M → L,C,A !!!
+const uint8_t GO_ACTIVE_CMD = 0b11000;  //M → L,C,A !!!
 const uint8_t MASTER_ADDR = 0b001;
 const uint8_t ASK_READY_CMD = 0b00011;   //M → L,C,A
 const uint8_t TELL_READY_CMD = 0b11100;  //M ← L,C,A
@@ -198,9 +198,6 @@ void loop() {
       Serial.println(">> Celebrating new ball!");
       startHeadMovement(RESET_POSITION);
       state = END_INTERACTION;
-      mp3.playFolder(1, 9);
-      delay(100);
-      startLedAnimation(175, 0, 183);
       hasMsg = true;
       break;
 
@@ -458,7 +455,7 @@ void handle_message(uint8_t raw) {
 
   switch (cmd) {
     case GO_ACTIVE_CMD:
-      Serial.println(">>> START_INTERACTION_CMD received");
+      Serial.println(">>> GO_ACTIVE_CMD received");
       state = INITIAL_INTERACTION;
       break;
 
