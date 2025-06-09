@@ -1,4 +1,4 @@
-# Skipy : University Project – Robotics and Design Course (2025)
+# Skipy : Indoor Communication Module – Robotics and Design Course (2025)
 
 This project was developed as part of the *Robotics and Design* course in 2025.  
 The goal was to design and build an interactive robot capable of detecting user presence and interaction through various sensors, performing human-like gestures using servos, playing pre-recorded audio, and displaying visual feedback via RGB LEDs.  
@@ -38,6 +38,7 @@ When the program is in the `CALL_NEXT` state, it calls the next number, repeatin
 - **1x 5V Power Supply** – For powering the microcontroller, servos, and sensors.
 - **1x 12V Power Supply** – For powering the optional amplifier.
 
+You can find the schematics for this components list in the folder `docs/Schematics.png`
 
 ## Before You Start
 
@@ -107,6 +108,8 @@ The `loop()` function controls the robot’s behavior through a **state machine*
 - **Audio**: every interaction or state can trigger sounds from the MP3 module using `playFolder`.  
 - **Button**: used to notify when the microwave is available/free. Pressing it set the variable isMicrowaveAvailable that updates the queue status and starts related actions.  
 
+![Flow Diagram](docs/Flowchart.png)
+
 
 ### I2C Communication
 
@@ -115,11 +118,13 @@ The robot communicates with a master controller via the I2C protocol:
 - Receives commands such as `START_INTERACTION_CMD`, `NOTIFY_LUCKYBALL_CMD`, etc.  
 - Sends messages like `TELL_READY_CMD`, `NOTIFY_HEADTOUCH_CMD`, and `ENDED_INTERACTION_CMD` to the master when needed.  
 
+![Flow Diagram](docs/I2C.png)
+
 ### Notes
 
 - Using enums and time management with `millis()` makes the robot’s behavior non-blocking and responsive.  
 - The code is modular, with separate functions for each type of action (`sayHelloAction`, `resetHeadPositionAction`, `ledAnimationAction`, etc.)  
-- The robot is designed to work in a coordinated ecosystem but also has a *standalone* version available on a separate branch.  
+- The robot is designed to work in a coordinated ecosystem but also has a `standalone-version` version available on a separate branch.  
 
 
 
